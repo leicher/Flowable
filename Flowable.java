@@ -24,7 +24,9 @@ public class Flowable<T> extends Thread implements MessageQueue.IdleHandler{
     private final Handler mMainHandler = new Handler(Looper.getMainLooper());
     private final List<Worker> mWorkerStack = new ArrayList<>();
     private boolean mCancel;
-    private AtomicBoolean mRunning = new AtomicBoolean(false);
+    private final AtomicBoolean mRunning = new AtomicBoolean(false);
+    private final AtomicBoolean mBeginning = new AtomicBoolean(false);
+    private final AtomicBoolean mStart = new AtomicBoolean(false);
     private T mData;
 
     public Flowable() {
@@ -40,7 +42,13 @@ public class Flowable<T> extends Thread implements MessageQueue.IdleHandler{
         mLooper = Looper.myLooper();
         mHandler = new Handler(mLooper);
         queue.addIdleHandler(this);
-        Looper.loop();
+        synchronized (mStart){
+            mStart.set(true);
+            if (mBeginning.get()){
+                next();
+            }
+            Looper.loop();
+        }
     }
 
     @Override
@@ -61,31 +69,70 @@ public class Flowable<T> extends Thread implements MessageQueue.IdleHandler{
                 if (worker.mMainThread){
                     msg = Message.obtain(mMainHandler, worker);
                     msg.what = WHAT_CODE;
-                    mMainHandler.sendMessage(msg);
+                    mMainHandler.sendMessageDelayed(msg, worker.mDelay);
                 }else {
                     msg = Message.obtain(mHandler, worker);
                     msg.what = WHAT_CODE;
-                    mHandler.sendMessage(msg);
+                    mHandler.sendMessageDelayed(msg, worker.mDelay);
                 }
             }
         }
     }
 
+    /**
+     *
+     * @param run 主线程运行的下一个事件
+     * @return this
+     */
     public Flowable nextInMain(Runnable run){
-        mWorkerStack.add(new Worker(run, true, this));
+        mWorkerStack.add(new Worker(run, true, this, 0));
         return this;
     }
 
+    /**
+     *
+     * @param run 子线程运行的 下一个事件
+     * @return this
+     */
     public Flowable next(Runnable run){
-        mWorkerStack.add(new Worker(run, false, this));
+        mWorkerStack.add(new Worker(run, false, this, 0));
         return this;
     }
 
+    /**
+     *
+     * @param run 子线程运行
+     * @param delay 延迟运行
+     * @return this
+     */
+    public Flowable nextDelayed(Runnable run, long delay){
+        mWorkerStack.add(new Worker(run, false, this, delay));
+        return this;
+    }
 
+    /**
+     *
+     * @param run 主线程运行
+     * @param delay 延迟
+     * @return this
+     */
+    public Flowable nextInMainDelayed(Runnable run, long delay){
+        mWorkerStack.add(new Worker(run, true, this, delay));
+        return this;
+    }
 
+    /**
+     * 开始事件流
+     */
     public void begin(){
         if (!mCancel && !mRunning.get()){
-            next();
+            synchronized (mStart){
+                if (mStart.get()){
+                    next();
+                }else {
+                    mBeginning.set(true);
+                }
+            }
         }
     }
 
@@ -93,6 +140,12 @@ public class Flowable<T> extends Thread implements MessageQueue.IdleHandler{
         return mData;
     }
 
+
+    /**
+     * 事件流传递的数据 {@link Event<T>}
+     * @param t 数据
+     * @return this
+     */
     public Flowable setData(T t) {
         this.mData = t;
         return this;
@@ -126,11 +179,13 @@ public class Flowable<T> extends Thread implements MessageQueue.IdleHandler{
         final Runnable mRun;
         final boolean mMainThread;
         final Flowable mFlow;
+        final long mDelay;
 
-        public Worker(Runnable mRun, boolean mMainThread, Flowable mFlow) {
+        public Worker(Runnable mRun, boolean mMainThread, Flowable mFlow, long mDelay) {
             this.mRun = mRun;
             this.mMainThread = mMainThread;
             this.mFlow = mFlow;
+            this.mDelay = mDelay;
         }
 
         @Override
