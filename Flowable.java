@@ -128,7 +128,9 @@ public class Flowable<T> extends Thread {
                 Worker worker = mWorkerStack.get(0);
                 if (!worker.mRunning){
                     if (mStart.get()){
-                        next();
+                        if (!(mHandler.hasMessages(WHAT_CODE) || mMainHandler.hasMessages(WHAT_CODE))){
+                            next();
+                        }
                     }else {
                         mNeedBegin.set(true);
                     }
@@ -192,7 +194,9 @@ public class Flowable<T> extends Thread {
 
         @Override
         public void run() {
-            mRunning = true;
+            synchronized (mFlow.mWorkerStack){
+                mRunning = true;
+            }
             if (mRun != null){
                 if (mRun instanceof Event){
                     ((Event) mRun).setT(mFlow.mData);
