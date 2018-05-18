@@ -3,7 +3,6 @@ package leicher.textswitcher;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
-import android.os.MessageQueue;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -14,7 +13,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * 事件流
  */
 
-public class Flowable<T> extends Thread implements MessageQueue.IdleHandler{
+public class Flowable<T> extends Thread {
 
     private static final int WHAT_CODE = 1 << 3;
 
@@ -22,10 +21,9 @@ public class Flowable<T> extends Thread implements MessageQueue.IdleHandler{
     private Looper mLooper;
     private Handler mHandler;
     private final Handler mMainHandler = new Handler(Looper.getMainLooper());
-    private final List<Worker> mWorkerStack = new ArrayList<>();
     private boolean mCancel;
-    private final AtomicBoolean mRunning = new AtomicBoolean(false);
-    private final AtomicBoolean mBeginning = new AtomicBoolean(false);
+    private final List<Worker> mWorkerStack = new ArrayList<>();
+    private final AtomicBoolean mNeedBegin = new AtomicBoolean(false);
     private final AtomicBoolean mStart = new AtomicBoolean(false);
     private T mData;
 
@@ -36,25 +34,19 @@ public class Flowable<T> extends Thread implements MessageQueue.IdleHandler{
     @Override
     public void run() {
         Looper.prepare();
-        // 消息 队列
-        MessageQueue queue = Looper.myQueue();
 
         mLooper = Looper.myLooper();
         mHandler = new Handler(mLooper);
-        queue.addIdleHandler(this);
+
         synchronized (mStart){
             mStart.set(true);
-            if (mBeginning.get()){
+            if (mNeedBegin.get()){
+                mNeedBegin.set(false); // 置为初始值
                 next();
             }
             Looper.loop();
+            mStart.set(false);
         }
-    }
-
-    @Override
-    public boolean queueIdle() {
-        next();
-        return true;
     }
 
 
@@ -62,7 +54,7 @@ public class Flowable<T> extends Thread implements MessageQueue.IdleHandler{
      * 下一个 消息
      */
     private void next(){
-        synchronized (this){
+        synchronized (mWorkerStack){
             Worker worker = pop();
             if (worker != null){
                 Message msg;
@@ -84,8 +76,8 @@ public class Flowable<T> extends Thread implements MessageQueue.IdleHandler{
      * @param run 主线程运行的下一个事件
      * @return this
      */
-    public Flowable<T> nextInMain(Runnable run){
-        mWorkerStack.add(new Worker(run, true, this, 0));
+    public Flowable nextInMain(Runnable run){
+        nextInMainDelayed(run, 0);
         return this;
     }
 
@@ -94,8 +86,8 @@ public class Flowable<T> extends Thread implements MessageQueue.IdleHandler{
      * @param run 子线程运行的 下一个事件
      * @return this
      */
-    public Flowable<T> next(Runnable run){
-        mWorkerStack.add(new Worker(run, false, this, 0));
+    public Flowable next(Runnable run){
+        nextDelayed(run, 0);
         return this;
     }
 
@@ -105,8 +97,10 @@ public class Flowable<T> extends Thread implements MessageQueue.IdleHandler{
      * @param delay 延迟运行
      * @return this
      */
-    public Flowable<T> nextDelayed(Runnable run, long delay){
-        mWorkerStack.add(new Worker(run, false, this, delay));
+    public Flowable nextDelayed(Runnable run, long delay){
+        synchronized (mWorkerStack) {
+            mWorkerStack.add(new Worker(run, false, this, delay));
+        }
         return this;
     }
 
@@ -116,8 +110,10 @@ public class Flowable<T> extends Thread implements MessageQueue.IdleHandler{
      * @param delay 延迟
      * @return this
      */
-    public Flowable<T> nextInMainDelayed(Runnable run, long delay){
-        mWorkerStack.add(new Worker(run, true, this, delay));
+    public Flowable nextInMainDelayed(Runnable run, long delay){
+        synchronized (mWorkerStack) {
+            mWorkerStack.add(new Worker(run, true, this, delay));
+        }
         return this;
     }
 
@@ -125,12 +121,17 @@ public class Flowable<T> extends Thread implements MessageQueue.IdleHandler{
      * 开始事件流
      */
     public void begin(){
-        if (!mCancel && !mRunning.get()){
-            synchronized (mStart){
-                if (mStart.get()){
-                    next();
-                }else {
-                    mBeginning.set(true);
+        synchronized (mWorkerStack){
+            if (mCancel) return;
+            int size = mWorkerStack.size();
+            if (size > 0){
+                Worker worker = mWorkerStack.get(0);
+                if (!worker.mRunning){
+                    if (mStart.get()){
+                        next();
+                    }else {
+                        mNeedBegin.set(true);
+                    }
                 }
             }
         }
@@ -155,8 +156,10 @@ public class Flowable<T> extends Thread implements MessageQueue.IdleHandler{
      * 移除掉所有消息并 停止 loop
      */
     public void cancel(){
-        mCancel = true;
-        mWorkerStack.clear();
+        synchronized (mWorkerStack){
+            mWorkerStack.clear();
+            mCancel = true;
+        }
         try{
             mLooper.quit();
         }catch (Exception e){
@@ -164,14 +167,12 @@ public class Flowable<T> extends Thread implements MessageQueue.IdleHandler{
         }
     }
 
-
-
     /**
      *
      * @return 从栈中取下一个
      */
     private Worker pop(){
-        return mWorkerStack.size() > 0 ? mWorkerStack.remove(0) : null;
+        return mWorkerStack.size() > 0 ? mWorkerStack.get(0) : null;
     }
 
     private static class Worker implements Runnable{
@@ -180,6 +181,7 @@ public class Flowable<T> extends Thread implements MessageQueue.IdleHandler{
         final boolean mMainThread;
         final Flowable mFlow;
         final long mDelay;
+        boolean mRunning;
 
         public Worker(Runnable mRun, boolean mMainThread, Flowable mFlow, long mDelay) {
             this.mRun = mRun;
@@ -190,16 +192,15 @@ public class Flowable<T> extends Thread implements MessageQueue.IdleHandler{
 
         @Override
         public void run() {
-            mFlow.mRunning.compareAndSet(false, true);
+            mRunning = true;
             if (mRun != null){
                 if (mRun instanceof Event){
                     ((Event) mRun).setT(mFlow.mData);
                 }
                 mRun.run();
             }
-            mFlow.mRunning.compareAndSet(true, false);
-            // 如果是主线程 则需要在这里发送下一个消息
-            if (mMainThread){
+            synchronized (mFlow.mWorkerStack){
+                mFlow.mWorkerStack.remove(this);
                 mFlow.next();
             }
         }
