@@ -84,7 +84,7 @@ public class Flowable<T> extends Thread implements MessageQueue.IdleHandler{
      * @param run 主线程运行的下一个事件
      * @return this
      */
-    public Flowable nextInMain(Runnable run){
+    public Flowable<T> nextInMain(Runnable run){
         mWorkerStack.add(new Worker(run, true, this, 0));
         return this;
     }
@@ -94,7 +94,7 @@ public class Flowable<T> extends Thread implements MessageQueue.IdleHandler{
      * @param run 子线程运行的 下一个事件
      * @return this
      */
-    public Flowable next(Runnable run){
+    public Flowable<T> next(Runnable run){
         mWorkerStack.add(new Worker(run, false, this, 0));
         return this;
     }
@@ -105,7 +105,7 @@ public class Flowable<T> extends Thread implements MessageQueue.IdleHandler{
      * @param delay 延迟运行
      * @return this
      */
-    public Flowable nextDelayed(Runnable run, long delay){
+    public Flowable<T> nextDelayed(Runnable run, long delay){
         mWorkerStack.add(new Worker(run, false, this, delay));
         return this;
     }
@@ -116,7 +116,7 @@ public class Flowable<T> extends Thread implements MessageQueue.IdleHandler{
      * @param delay 延迟
      * @return this
      */
-    public Flowable nextInMainDelayed(Runnable run, long delay){
+    public Flowable<T> nextInMainDelayed(Runnable run, long delay){
         mWorkerStack.add(new Worker(run, true, this, delay));
         return this;
     }
@@ -146,7 +146,7 @@ public class Flowable<T> extends Thread implements MessageQueue.IdleHandler{
      * @param t 数据
      * @return this
      */
-    public Flowable setData(T t) {
+    public Flowable<T> setData(T t) {
         this.mData = t;
         return this;
     }
