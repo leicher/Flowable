@@ -13,7 +13,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * 事件流
  */
 
-@SuppressWarnings("")
+@SuppressWarnings("unused")
 public class Flowable<T> extends Thread implements Handler.Callback, Runnable{
 
     private static final int WHAT_RUN = 1 << 27;
@@ -186,7 +186,7 @@ public class Flowable<T> extends Thread implements Handler.Callback, Runnable{
      * @param target
      * @return
      */
-    public Flowable<T> behindDealyed(Runnable run, long delay, Runnable target){
+    public Flowable<T> behindDelayed(Runnable run, long delay, Runnable target){
         behindInternal(run, delay, false, target);
         return this;
     }
@@ -277,7 +277,6 @@ public class Flowable<T> extends Thread implements Handler.Callback, Runnable{
      */
     public Flowable<T> begin(){
         synchronized (mWorkerQueue){
-            System.out.println(mPause + "=====" + mRunning+ "==="+mCancel);
             mPause = false;
             if (mCancel || mRunning) return this;
             Worker worker = pop();
